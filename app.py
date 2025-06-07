@@ -379,6 +379,27 @@ def main():
     .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #f0f2f6; border-radius: 4px 4px 0 0; gap: 1px; padding-top: 10px; padding-bottom: 10px; }
     .stTabs [aria-selected="true"] { background-color: #e6f0ff; border-bottom: 2px solid #4c78a8; }
     .dataframe { font-size: 12px; }
+    .warning-box { 
+        background-color: #fff3cd; 
+        border-left: 6px solid #ffc107; 
+        padding: 10px; 
+        margin-bottom: 15px; 
+        border-radius: 4px;
+    }
+    .info-box { 
+        background-color: #cfe2ff; 
+        border-left: 6px solid #0d6efd; 
+        padding: 10px; 
+        margin-bottom: 15px; 
+        border-radius: 4px;
+    }
+    .success-box { 
+        background-color: #d1e7dd; 
+        border-left: 6px solid #198754; 
+        padding: 10px; 
+        margin-bottom: 15px; 
+        border-radius: 4px;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -400,10 +421,12 @@ def main():
     all_tickers = get_exchange_tickers(selected_exchange)
     if len(all_tickers) > MAX_TICKERS: all_tickers = all_tickers[:MAX_TICKERS]
     
-    tab_results, tab_settings, tab_logs, tab_fund_data = st.tabs(["📊 Screener Results", "⚙️ Settings", "ℹ️ About & Logs", "📈 Fundamental Data"])
+    tab_results, tab_settings, tab_logs, tab_fund_data, tab_custom_data = st.tabs(["📊 Screener Results", "⚙️ Settings", "ℹ️ About & Logs", "📈 Fundamental Data", "📥 Custom Data"])
     
     with st.sidebar:
         st.header("Screening Filters")
+        
+        # Technical Filters Section
         st.subheader("Technical Filters")
         rsi_min, rsi_max = st.slider("RSI Range", 0, 100, (0, 100), 1)
         cols_tech = st.columns(3)
@@ -411,12 +434,34 @@ def main():
         show_overbought = cols_tech[1].checkbox("Overbought", value=True)
         show_neutral = cols_tech[2].checkbox("Neutral", value=True)
         
+        # Fundamental Filters Section with Enable/Disable option
         st.subheader("Fundamental Filters")
-        skip_missing = st.checkbox("Skip Missing Data", value=True, help="If checked, stocks will not be filtered out when data is missing")
-        min_net_income_filter = st.slider("Min Net Income (T)", 0.0, 5.0, DEFAULT_MIN_NI, 0.1)
-        max_pe_filter = st.slider("Max P/E Ratio", 1.0, 100.0, DEFAULT_MAX_PE, 1.0)
-        max_pb_filter = st.slider("Max P/B Ratio", 0.1, 20.0, DEFAULT_MAX_PB, 0.1)
-        min_growth_filter = st.slider("Min YoY Growth (%)", -100.0, 200.0, DEFAULT_MIN_GROWTH, 5.0)
+        enable_fundamental = st.checkbox("Enable Fundamental Screening", value=False, 
+                                        help="Warning: Yahoo Finance has limited fundamental data for many exchanges. Disable for technical-only screening.")
+        
+        # Only show fundamental filters if enabled
+        if enable_fundamental:
+            skip_missing = st.checkbox("Skip Missing Data", value=True, 
+                                      help="If checked, stocks will not be filtered out when data is missing")
+            min_net_income_filter = st.slider("Min Net Income (T)", 0.0, 5.0, DEFAULT_MIN_NI, 0.1)
+            max_pe_filter = st.slider("Max P/E Ratio", 1.0, 100.0, DEFAULT_MAX_PE, 1.0)
+            max_pb_filter = st.slider("Max P/B Ratio", 0.1, 20.0, DEFAULT_MAX_PB, 0.1)
+            min_growth_filter = st.slider("Min YoY Growth (%)", -100.0, 200.0, DEFAULT_MIN_GROWTH, 5.0)
+        else:
+            # Default values when fundamental screening is disabled
+            skip_missing = True
+            min_net_income_filter = 0.0
+            max_pe_filter = 100.0
+            max_pb_filter = 20.0
+            min_growth_filter = -100.0
+            
+            # Show info about disabled fundamental screening
+            st.markdown("""
+            <div class="info-box">
+            <strong>Fundamental Screening Disabled</strong><br>
+            Only technical filters will be applied. All stocks passing technical screening will be shown.
+            </div>
+            """, unsafe_allow_html=True)
         
         if st.button("Run Screener Now", type="primary"):
             for key in ['tech_passed_tickers', 'fund_passed_tickers', 'errors', 'warnings', 'filtered_out_technical', 'filtered_out_fundamental', 'raw_fundamental_data']:
@@ -427,6 +472,7 @@ def main():
                 status_text = st.empty()
                 if not all_tickers: status_text.error("No tickers available."); progress_bar.empty(); return
 
+                # Technical Screening Phase
                 tech_passed_all = []
                 total_batches = (len(all_tickers) + BATCH_SIZE - 1) // BATCH_SIZE
                 for batch_idx in range(total_batches):
@@ -440,45 +486,93 @@ def main():
                     progress_bar.progress((batch_idx + 1) / total_batches * 0.5)
                 st.session_state.tech_passed_tickers = tech_passed_all
 
-                if not tech_passed_all: status_text.text("No stocks passed technical screening."); progress_bar.empty(); return
+                if not tech_passed_all: 
+                    status_text.text("No stocks passed technical screening."); 
+                    progress_bar.empty(); 
+                    return
                 
-                fund_passed_all = []
-                tech_passed_symbols_list = [res[0] for res in tech_passed_all]
-                total_fund_batches = (len(tech_passed_symbols_list) + BATCH_SIZE - 1) // BATCH_SIZE
-                raw_fundamental_data_dict = {}
+                # If fundamental screening is disabled, skip to results
+                if not enable_fundamental:
+                    st.session_state.fund_passed_tickers = []  # Empty list, no fundamental screening
+                    status_text.text(f"Screening complete! {len(tech_passed_all)} stocks passed technical screening. Fundamental screening disabled.")
+                    progress_bar.empty()
+                else:
+                    # Fundamental Screening Phase (only if enabled)
+                    fund_passed_all = []
+                    tech_passed_symbols_list = [res[0] for res in tech_passed_all]
+                    total_fund_batches = (len(tech_passed_symbols_list) + BATCH_SIZE - 1) // BATCH_SIZE
+                    raw_fundamental_data_dict = {}
 
-                for batch_idx in range(total_fund_batches):
-                    status_text.text(f"Fundamental screening: batch {batch_idx+1}/{total_fund_batches} for {len(tech_passed_symbols_list)} stocks...")
-                    batch_fund_tickers = tech_passed_symbols_list[batch_idx*BATCH_SIZE : (batch_idx+1)*BATCH_SIZE]
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                        futures_fund = {executor.submit(process_ticker_fundamental, t, min_net_income_filter, max_pe_filter, max_pb_filter, min_growth_filter, skip_missing): t for t in batch_fund_tickers}
-                        for i, future in enumerate(concurrent.futures.as_completed(futures_fund)):
-                            ticker_processed = futures_fund[future]
-                            result_fund = future.result()
-                            if result_fund and len(result_fund) == 6: # Ensure result is not None and has 6 elements
-                                if result_fund[0] is not None: # Check if ticker is part of the result (passed filters)
-                                     fund_passed_all.append(result_fund)
-                                raw_fundamental_data_dict[ticker_processed] = result_fund[5] # Store raw data for all processed
-                            elif result_fund and len(result_fund) == 6 and result_fund[0] is None: # Ticker failed fundamental but raw data exists
-                                raw_fundamental_data_dict[ticker_processed] = result_fund[5]
-                            progress_bar.progress(0.5 + ( (batch_idx * BATCH_SIZE + i + 1) / len(tech_passed_symbols_list) * 0.5) )
-                
-                st.session_state.fund_passed_tickers = fund_passed_all
-                st.session_state.raw_fundamental_data = raw_fundamental_data_dict
-                status_text.text(f"Screening complete! {len(fund_passed_all)} stocks passed all filters." if fund_passed_all else f"{len(tech_passed_all)} passed technical, 0 passed fundamental. Check filters or data.")
-                progress_bar.empty()
+                    for batch_idx in range(total_fund_batches):
+                        status_text.text(f"Fundamental screening: batch {batch_idx+1}/{total_fund_batches} for {len(tech_passed_symbols_list)} stocks...")
+                        batch_fund_tickers = tech_passed_symbols_list[batch_idx*BATCH_SIZE : (batch_idx+1)*BATCH_SIZE]
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                            futures_fund = {executor.submit(process_ticker_fundamental, t, min_net_income_filter, max_pe_filter, max_pb_filter, min_growth_filter, skip_missing): t for t in batch_fund_tickers}
+                            for i, future in enumerate(concurrent.futures.as_completed(futures_fund)):
+                                ticker_processed = futures_fund[future]
+                                result_fund = future.result()
+                                if result_fund and len(result_fund) == 6: # Ensure result is not None and has 6 elements
+                                    if result_fund[0] is not None: # Check if ticker is part of the result (passed filters)
+                                         fund_passed_all.append(result_fund)
+                                    raw_fundamental_data_dict[ticker_processed] = result_fund[5] # Store raw data for all processed
+                                elif result_fund and len(result_fund) == 6 and result_fund[0] is None: # Ticker failed fundamental but raw data exists
+                                    raw_fundamental_data_dict[ticker_processed] = result_fund[5]
+                                progress_bar.progress(0.5 + ( (batch_idx * BATCH_SIZE + i + 1) / len(tech_passed_symbols_list) * 0.5) )
+                    
+                    st.session_state.fund_passed_tickers = fund_passed_all
+                    st.session_state.raw_fundamental_data = raw_fundamental_data_dict
+                    status_text.text(f"Screening complete! {len(tech_passed_all)} passed technical, {len(fund_passed_all)} passed fundamental.")
+                    progress_bar.empty()
 
-    with tab_settings: st.header("Settings"); show_debug = st.checkbox("Show Debug Logs", value=True)
+    with tab_settings: 
+        st.header("Settings")
+        show_debug = st.checkbox("Show Debug Logs", value=True)
+        
+        st.subheader("Data Source Settings")
+        st.markdown("""
+        <div class="info-box">
+        <strong>About Yahoo Finance Data</strong><br>
+        Yahoo Finance provides reliable technical data (price history, RSI) for most exchanges, but fundamental data coverage varies:
+        <ul>
+        <li>IDX (Indonesia): Limited fundamental data</li>
+        <li>NYSE, NASDAQ, AMEX: Inconsistent fundamental data through API</li>
+        </ul>
+        For best results, use technical screening only or upload custom fundamental data.
+        </div>
+        """, unsafe_allow_html=True)
+        
     with tab_logs:
         st.header("About & Logs")
+        
+        st.markdown("""
+        <div class="info-box">
+        <strong>Multi-Exchange Stock Screener</strong><br>
+        This application allows you to screen stocks from multiple exchanges using technical and fundamental criteria.
+        <ul>
+        <li><strong>Technical Screening:</strong> Based on RSI (Relative Strength Index) values and signals</li>
+        <li><strong>Fundamental Screening:</strong> Based on Net Income, P/E Ratio, P/B Ratio, and YoY Growth</li>
+        </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
         if show_debug:
             for log_name, log_dict_key in [("Errors", "errors"), ("Warnings", "warnings"), ("Filtered (Technical)", "filtered_out_technical"), ("Filtered (Fundamental)", "filtered_out_fundamental")]:
                 with st.expander(log_name, expanded=False):
                     log_data = st.session_state.get(log_dict_key, {})
                     if log_data: [st.write(f"**{k}**: {v}") for k, v in log_data.items()]
                     else: st.write("None")
+                    
     with tab_fund_data:
         st.header("Fundamental Data Availability")
+        
+        st.markdown("""
+        <div class="warning-box">
+        <strong>Limited Fundamental Data</strong><br>
+        Yahoo Finance provides inconsistent fundamental data coverage across different exchanges.
+        This tab shows which fundamental metrics are available for each stock that passed technical screening.
+        </div>
+        """, unsafe_allow_html=True)
+        
         if st.session_state.get('raw_fundamental_data'):
             fund_data_rows = []
             for ticker, data in st.session_state.raw_fundamental_data.items():
@@ -486,37 +580,107 @@ def main():
                                      "P/E Avail": "✅" if data.get("pe_ratio_final_value") is not None else "❌", 
                                      "P/B Avail": "✅" if data.get("pb_ratio_final_value") is not None else "❌",
                                      "Growth Calc": "✅" if data.get("growth_calculated_value") not in [None, "NaN"] else "❌" })
-            if fund_data_rows: st.dataframe(pd.DataFrame(fund_data_rows))
-            selected_ticker_details = st.selectbox("Select Ticker for Raw Details", options=list(st.session_state.raw_fundamental_data.keys()))
-            if selected_ticker_details: st.json(st.session_state.raw_fundamental_data[selected_ticker_details])
+            if fund_data_rows: 
+                st.dataframe(pd.DataFrame(fund_data_rows))
+                
+                # Summary statistics
+                total_stocks = len(fund_data_rows)
+                ni_available = sum(1 for row in fund_data_rows if row["NI Avail"] == "✅")
+                pe_available = sum(1 for row in fund_data_rows if row["P/E Avail"] == "✅")
+                pb_available = sum(1 for row in fund_data_rows if row["P/B Avail"] == "✅")
+                growth_available = sum(1 for row in fund_data_rows if row["Growth Calc"] == "✅")
+                
+                st.markdown(f"""
+                <div class="info-box">
+                <strong>Data Availability Summary</strong><br>
+                Out of {total_stocks} stocks that passed technical screening:
+                <ul>
+                <li>Net Income available: {ni_available} ({ni_available/total_stocks*100:.1f}%)</li>
+                <li>P/E Ratio available: {pe_available} ({pe_available/total_stocks*100:.1f}%)</li>
+                <li>P/B Ratio available: {pb_available} ({pb_available/total_stocks*100:.1f}%)</li>
+                <li>Growth calculable: {growth_available} ({growth_available/total_stocks*100:.1f}%)</li>
+                </ul>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                selected_ticker_details = st.selectbox("Select Ticker for Raw Details", options=list(st.session_state.raw_fundamental_data.keys()))
+                if selected_ticker_details: st.json(st.session_state.raw_fundamental_data[selected_ticker_details])
         else: st.info("Run screener to see data.")
+        
+    with tab_custom_data:
+        st.header("Custom Fundamental Data")
+        
+        st.markdown("""
+        <div class="info-box">
+        <strong>Upload Your Own Fundamental Data</strong><br>
+        Since Yahoo Finance has limited fundamental data for many exchanges, you can upload your own data here.
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.subheader("Upload CSV File")
+        st.markdown("""
+        Prepare a CSV file with the following columns:
+        - **Ticker**: Stock symbol (required)
+        - **NetIncome**: Net Income value (optional)
+        - **PE**: Price to Earnings ratio (optional)
+        - **PB**: Price to Book ratio (optional)
+        - **Growth**: Year-over-Year growth percentage (optional)
+        
+        Example:
+        ```
+        Ticker,NetIncome,PE,PB,Growth
+        AAPL,100.5,15.2,6.7,12.3
+        MSFT,85.3,28.1,10.2,8.5
+        ```
+        """)
+        
+        uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+        if uploaded_file is not None:
+            try:
+                custom_data = pd.read_csv(uploaded_file)
+                if 'Ticker' not in custom_data.columns:
+                    st.error("CSV file must contain a 'Ticker' column")
+                else:
+                    st.success(f"Successfully loaded data for {len(custom_data)} stocks")
+                    st.dataframe(custom_data.head(10))
+                    
+                    # Store in session state for future use
+                    st.session_state['custom_fundamental_data'] = custom_data
+                    
+                    # Option to use this data
+                    if st.button("Use Custom Data for Screening"):
+                        st.session_state['use_custom_data'] = True
+                        st.info("Custom data will be used for the next screening run. Go back to the Screener Results tab and click 'Run Screener Now'.")
+            except Exception as e:
+                st.error(f"Error loading CSV file: {e}")
 
     with tab_results:
-        if not st.session_state.get('tech_passed_tickers'): st.info("👈 Run screener."); return
-        col_tech_res, col_fund_res = st.columns([1,1])
-        with col_tech_res:
-            st.subheader("Technical Screening Results")
-            tech_df = pd.DataFrame([t[:3] for t in st.session_state.tech_passed_tickers], columns=["Ticker", "RSI", "Signal"])
-            if not tech_df.empty: st.dataframe(tech_df, height=400); st.download_button("Download Tech CSV", tech_df.to_csv(index=False), "tech.csv", "text/csv")
-        with col_fund_res:
-            st.subheader("Fundamental Screening Results")
-            if st.session_state.get('fund_passed_tickers'):
-                fund_df_data = []
-                for res_fund in st.session_state.fund_passed_tickers:
-                    ticker, ni, growth, pe, pb, _ = res_fund
-                    tech_match = next((t for t in st.session_state.tech_passed_tickers if t[0] == ticker), [None]*3)
-                    fund_df_data.append({"Ticker": ticker, "RSI": f"{tech_match[1]:.2f}" if tech_match[1] is not None else "N/A", "Signal": tech_match[2],
-                                         "Net Income (T)": f"{ni:.3f}" if ni is not None else "N/A", 
-                                         "Growth (%)": f"{growth:.2f}" if growth is not None else "N/A", 
-                                         "P/E": f"{pe:.2f}" if pe is not None else "N/A", 
-                                         "P/B": f"{pb:.2f}" if pb is not None else "N/A"})
-                if fund_df_data:
-                    fund_df = pd.DataFrame(fund_df_data)
-                    st.dataframe(fund_df, height=400); st.download_button("Download Fund CSV", fund_df.to_csv(index=False), "fund.csv", "text/csv")
-                else: st.warning("No stocks passed fundamental screening. Check filters/data.") # Should not happen if list has items
-            else: st.warning("No stocks passed fundamental screening. Check filters/data.")
+        if not st.session_state.get('tech_passed_tickers'): 
+            st.info("👈 Set your filters and click 'Run Screener Now' to start screening.")
+            return
+            
+        # Display warning about fundamental data if appropriate
+        if not st.session_state.get('fund_passed_tickers') and 'tech_passed_tickers' in st.session_state:
+            st.markdown("""
+            <div class="warning-box">
+            <strong>No Stocks Passed Fundamental Screening</strong><br>
+            This is likely due to limited fundamental data availability from Yahoo Finance. Consider:
+            <ul>
+            <li>Disabling fundamental screening to see all stocks that pass technical criteria</li>
+            <li>Uploading custom fundamental data in the "Custom Data" tab</li>
+            <li>Using "Skip Missing Data" option with very relaxed fundamental filters</li>
+            </ul>
+            </div>
+            """, unsafe_allow_html=True)
         
-        if st.session_state.get('tech_passed_tickers'):
+        # Technical Results Section
+        st.subheader("Technical Screening Results")
+        tech_df = pd.DataFrame([t[:3] for t in st.session_state.tech_passed_tickers], columns=["Ticker", "RSI", "Signal"])
+        if not tech_df.empty: 
+            st.dataframe(tech_df, height=400)
+            st.download_button("Download Technical Results CSV", tech_df.to_csv(index=False), "technical_results.csv", "text/csv")
+            
+            # RSI Charts Section
             st.subheader("RSI Charts (Max 12)")
             chart_cols_grid = 3
             display_limit_charts = min(12, len(st.session_state.tech_passed_tickers))
@@ -528,6 +692,25 @@ def main():
                         with cols_charts[j]:
                             st.markdown(f"**{ticker_chart}** - RSI: {rsi_chart:.2f} ({signal_chart})")
                             st.markdown(create_rsi_chart(ticker_chart, rsi_hist_chart), unsafe_allow_html=True)
+        
+        # Fundamental Results Section (only if enabled and stocks passed)
+        if st.session_state.get('fund_passed_tickers'):
+            st.subheader("Fundamental Screening Results")
+            fund_df_data = []
+            for res_fund in st.session_state.fund_passed_tickers:
+                ticker, ni, growth, pe, pb, _ = res_fund
+                tech_match = next((t for t in st.session_state.tech_passed_tickers if t[0] == ticker), [None]*3)
+                fund_df_data.append({"Ticker": ticker, "RSI": f"{tech_match[1]:.2f}" if tech_match[1] is not None else "N/A", "Signal": tech_match[2],
+                                     "Net Income (T)": f"{ni:.3f}" if ni is not None else "N/A", 
+                                     "Growth (%)": f"{growth:.2f}" if growth is not None else "N/A", 
+                                     "P/E": f"{pe:.2f}" if pe is not None else "N/A", 
+                                     "P/B": f"{pb:.2f}" if pb is not None else "N/A"})
+            if fund_df_data:
+                fund_df = pd.DataFrame(fund_df_data)
+                st.dataframe(fund_df, height=400)
+                st.download_button("Download Fundamental Results CSV", fund_df.to_csv(index=False), "fundamental_results.csv", "text/csv")
+            else: 
+                st.warning("No stocks passed fundamental screening. Try disabling fundamental screening or using custom data.")
 
 if __name__ == "__main__":
     main()
