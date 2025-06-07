@@ -343,33 +343,33 @@ def process_ticker_fundamental(ticker, min_net_income_filter, max_pe_filter, max
 def create_rsi_chart(ticker, rsi_history):
     try:
         fig, ax = plt.subplots(figsize=(6, 1.5))
-        ax.plot(range(len(rsi_history)), rsi_history, color=\'blue\', linewidth=2)
-        ax.axhline(y=OVERBOUGHT_THRESHOLD, color=\'red\', linestyle=\'--\', alpha=0.5)
-        ax.axhline(y=OVERSOLD_THRESHOLD, color=\'green\', linestyle=\'--\', alpha=0.5)
+        ax.plot(range(len(rsi_history)), rsi_history, color="blue", linewidth=2)
+        ax.axhline(y=OVERBOUGHT_THRESHOLD, color="red", linestyle="--", alpha=0.5)
+        ax.axhline(y=OVERSOLD_THRESHOLD, color="green", linestyle="--", alpha=0.5)
         ax.set_ylim(0, 100)
         ax.set_xticks([])
-        ax.set_ylabel(\'RSI\')
-        ax.set_title(f\'{ticker} RSI ({RSI_PERIOD}-day)\')
+        ax.set_ylabel("RSI")
+        ax.set_title(f"{ticker} RSI ({RSI_PERIOD}-day)")
         ax.fill_between(range(len(rsi_history)), rsi_history, OVERBOUGHT_THRESHOLD, 
                         where=(rsi_history >= OVERBOUGHT_THRESHOLD), 
-                        color=\'red\', alpha=0.2)
+                        color="red", alpha=0.2)
         ax.fill_between(range(len(rsi_history)), rsi_history, OVERSOLD_THRESHOLD, 
                         where=(rsi_history <= OVERSOLD_THRESHOLD), 
-                        color=\'green\', alpha=0.2)
+                        color="green", alpha=0.2)
         buf = io.BytesIO()
         fig.tight_layout()
-        plt.savefig(buf, format=\'png\')
+        plt.savefig(buf, format="png")
         plt.close(fig)
         buf.seek(0)
-        img_str = base64.b64encode(buf.read()).decode(\'utf-8\')
-        return f\'<img src="data:image/png;base64,{img_str}" alt="RSI Chart for {ticker}">\'
+        img_str = base64.b64encode(buf.read()).decode("utf-8")
+        return f'<img src="data:image/png;base64,{img_str}" alt="RSI Chart for {ticker}">'
     except Exception as e:
-        return f"<div style=\'color:red\'>Chart failed: {e}</div>"
+        return f"<div style='color:red'>Chart failed: {e}</div>"
 
 
 def get_exchange_suffix(exchange):
-    if exchange == \'IDX\': return \'.JK\'
-    return \'\'
+    if exchange == 'IDX': return '.JK'
+    return ''
 
 def main():
     st.set_page_config(page_title="Multi-Exchange Stock Screener", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
@@ -382,19 +382,19 @@ def main():
     </style>
     """, unsafe_allow_html=True)
 
-    if \'selected_exchange\' not in st.session_state: st.session_state.selected_exchange = \'IDX\'
+    if 'selected_exchange' not in st.session_state: st.session_state.selected_exchange = 'IDX'
     exchange_info = get_exchange_info()
     
     col1_title, col2_select = st.columns([2, 3])
     with col1_title: st.title("Multi-Exchange Stock Screener")
     with col2_select:
         selected_exchange = st.selectbox("Select Exchange:", options=list(exchange_info.keys()), 
-                                         format_func=lambda x: f"{exchange_info[x][\"name\"]} ({exchange_info[x][\"count\"]} stocks)", 
+                                         format_func=lambda x: f"{exchange_info[x]['name']} ({exchange_info[x]['count']} stocks)", 
                                          index=list(exchange_info.keys()).index(st.session_state.selected_exchange))
     
     if selected_exchange != st.session_state.selected_exchange:
         st.session_state.selected_exchange = selected_exchange
-        for key in [\'tech_passed_tickers\', \'fund_passed_tickers\', \'errors\', \'warnings\', \'filtered_out_technical\', \'filtered_out_fundamental\', \'raw_fundamental_data\']:
+        for key in ['tech_passed_tickers', 'fund_passed_tickers', 'errors', 'warnings', 'filtered_out_technical', 'filtered_out_fundamental', 'raw_fundamental_data']:
             if key in st.session_state: del st.session_state[key]
     
     all_tickers = get_exchange_tickers(selected_exchange)
@@ -419,8 +419,8 @@ def main():
         min_growth_filter = st.slider("Min YoY Growth (%)", -100.0, 200.0, DEFAULT_MIN_GROWTH, 5.0)
         
         if st.button("Run Screener Now", type="primary"):
-            for key in [\'tech_passed_tickers\', \'fund_passed_tickers\', \'errors\', \'warnings\', \'filtered_out_technical\', \'filtered_out_fundamental\', \'raw_fundamental_data\']:
-                 st.session_state[key] = [] if \'passed_tickers\' in key else {}
+            for key in ['tech_passed_tickers', 'fund_passed_tickers', 'errors', 'warnings', 'filtered_out_technical', 'filtered_out_fundamental', 'raw_fundamental_data']:
+                 st.session_state[key] = [] if 'passed_tickers' in key else {}
             
             with tab_results:
                 progress_bar = st.progress(0)
@@ -479,7 +479,7 @@ def main():
                     else: st.write("None")
     with tab_fund_data:
         st.header("Fundamental Data Availability")
-        if st.session_state.get(\'raw_fundamental_data\'):
+        if st.session_state.get('raw_fundamental_data'):
             fund_data_rows = []
             for ticker, data in st.session_state.raw_fundamental_data.items():
                 fund_data_rows.append({"Ticker": ticker, "NI Avail": "✅" if data.get("net_income_calculated_trillions") not in [None, "NaN"] else "❌", 
@@ -492,7 +492,7 @@ def main():
         else: st.info("Run screener to see data.")
 
     with tab_results:
-        if not st.session_state.get(\'tech_passed_tickers\'): st.info("👈 Run screener."); return
+        if not st.session_state.get('tech_passed_tickers'): st.info("👈 Run screener."); return
         col_tech_res, col_fund_res = st.columns([1,1])
         with col_tech_res:
             st.subheader("Technical Screening Results")
@@ -500,7 +500,7 @@ def main():
             if not tech_df.empty: st.dataframe(tech_df, height=400); st.download_button("Download Tech CSV", tech_df.to_csv(index=False), "tech.csv", "text/csv")
         with col_fund_res:
             st.subheader("Fundamental Screening Results")
-            if st.session_state.get(\'fund_passed_tickers\'):
+            if st.session_state.get('fund_passed_tickers'):
                 fund_df_data = []
                 for res_fund in st.session_state.fund_passed_tickers:
                     ticker, ni, growth, pe, pb, _ = res_fund
@@ -516,7 +516,7 @@ def main():
                 else: st.warning("No stocks passed fundamental screening. Check filters/data.") # Should not happen if list has items
             else: st.warning("No stocks passed fundamental screening. Check filters/data.")
         
-        if st.session_state.get(\'tech_passed_tickers\'):
+        if st.session_state.get('tech_passed_tickers'):
             st.subheader("RSI Charts (Max 12)")
             chart_cols_grid = 3
             display_limit_charts = min(12, len(st.session_state.tech_passed_tickers))
@@ -531,4 +531,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
