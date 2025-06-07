@@ -360,10 +360,10 @@ def process_ticker_technical_first(ticker, rsi_min, rsi_max, show_oversold, show
             st.session_state.filtered_out_technical[ticker] = f"Filtered out: RSI {rsi:.1f} outside range {rsi_min}-{rsi_max}."
             return None
 
-        # Apply RSI signal filters
-        if (signal == "Oversold" and not show_oversold) or \
-           (signal == "Overbought" and not show_overbought) or \
-           (signal == "Neutral" and not show_neutral):
+        # Apply RSI signal filters - FIXED to properly handle signal filtering
+        if ((signal == "Oversold" and not show_oversold) or 
+            (signal == "Overbought" and not show_overbought) or 
+            (signal == "Neutral" and not show_neutral)):
             print(f"[{ticker}] Filtering out: RSI signal '{signal}' not selected for display.")
             st.session_state.setdefault("filtered_out_technical", {})
             st.session_state.filtered_out_technical[ticker] = f"Filtered out: RSI signal '{signal}' not selected for display."
@@ -468,7 +468,7 @@ def process_ticker_fundamental(ticker, min_net_income, max_pe, max_pb, min_growt
 def create_rsi_chart(ticker, rsi_history):
     '''Create a matplotlib chart for RSI history'''
     try:
-        fig, ax = plt.subplots(figsize=(8, 2))
+        fig, ax = plt.subplots(figsize=(6, 1.5))  # Smaller chart size
         ax.plot(range(len(rsi_history)), rsi_history, color='blue', linewidth=2)
         
         # Add overbought/oversold lines
@@ -530,6 +530,34 @@ def main():
         initial_sidebar_state="expanded"
     )
 
+    # Apply custom CSS for a more professional look
+    st.markdown("""
+    <style>
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 2px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        white-space: pre-wrap;
+        background-color: #f0f2f6;
+        border-radius: 4px 4px 0 0;
+        gap: 1px;
+        padding-top: 10px;
+        padding-bottom: 10px;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #e6f0ff;
+        border-bottom: 2px solid #4c78a8;
+    }
+    .dataframe {
+        font-size: 12px;
+    }
+    .css-1aumxhk {
+        max-width: 1200px;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     # Initialize session state for selected exchange
     if 'selected_exchange' not in st.session_state:
         st.session_state.selected_exchange = 'IDX'
@@ -537,16 +565,18 @@ def main():
     # Get exchange info for display
     exchange_info = get_exchange_info()
     
-    # Title and exchange selection
-    st.title("Multi-Exchange Stock Screener")
-    
-    # Exchange selection dropdown
-    selected_exchange = st.selectbox(
-        "Select Exchange:",
-        options=list(exchange_info.keys()),
-        format_func=lambda x: f"{exchange_info[x]['name']} ({exchange_info[x]['count']} stocks)",
-        index=list(exchange_info.keys()).index(st.session_state.selected_exchange)
-    )
+    # Title and exchange selection in a more compact layout
+    col1, col2 = st.columns([2, 3])
+    with col1:
+        st.title("Multi-Exchange Stock Screener")
+    with col2:
+        # Exchange selection dropdown
+        selected_exchange = st.selectbox(
+            "Select Exchange:",
+            options=list(exchange_info.keys()),
+            format_func=lambda x: f"{exchange_info[x]['name']} ({exchange_info[x]['count']} stocks)",
+            index=list(exchange_info.keys()).index(st.session_state.selected_exchange)
+        )
     
     # Update session state if exchange changed
     if selected_exchange != st.session_state.selected_exchange:
@@ -615,10 +645,10 @@ def main():
         st.warning(f"⚠️ Limited to first {MAX_TICKERS} tickers to avoid overloading.")
         all_tickers = all_tickers[:MAX_TICKERS]
     
-    # Create tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["Screener Results", "Settings", "About & Logs", "Fundamental Data"])
+    # Create tabs with a more professional layout
+    tab1, tab2, tab3, tab4 = st.tabs(["📊 Screener Results", "⚙️ Settings", "ℹ️ About & Logs", "📈 Fundamental Data"])
     
-    # Sidebar for filters
+    # Sidebar for filters - more compact layout
     with st.sidebar:
         st.header("Screening Filters")
         
@@ -634,14 +664,14 @@ def main():
             step=1
         )
         
-        # RSI Signal Checkboxes
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            show_oversold = st.checkbox("Show Oversold", value=True)
-        with col2:
-            show_overbought = st.checkbox("Show Overbought", value=True)
-        with col3:
-            show_neutral = st.checkbox("Show Neutral", value=True)
+        # RSI Signal Checkboxes in a more compact layout
+        cols = st.columns(3)
+        with cols[0]:
+            show_oversold = st.checkbox("Oversold", value=True)
+        with cols[1]:
+            show_overbought = st.checkbox("Overbought", value=True)
+        with cols[2]:
+            show_neutral = st.checkbox("Neutral", value=True)
         
         # Fundamental Filters
         st.subheader("Fundamental Filters")
@@ -717,7 +747,7 @@ def main():
                     end_idx = min(start_idx + BATCH_SIZE, len(all_tickers))
                     batch_tickers = all_tickers[start_idx:end_idx]
                     
-                    status_text.text(f"--- Processing technical batch of {len(batch_tickers)} tickers ({batch_tickers[0]}...{batch_tickers[-1]}) ---")
+                    status_text.text(f"Processing technical screening: {batch_idx+1}/{total_batches} batches...")
                     
                     # Process technical filters in parallel
                     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
@@ -753,14 +783,12 @@ def main():
                         # Process results as they complete
                         for i, (ticker, future) in enumerate(futures):
                             result = future.result()
-                            print(f"({i+1}/{len(futures)}) Future completed for {ticker}")
                             if result:
                                 tech_passed_all.append(result)
                     
                     # Update progress
-                    progress = (batch_idx + 1) / total_batches
+                    progress = (batch_idx + 1) / total_batches * 0.5  # Technical screening is 50% of total
                     progress_bar.progress(progress)
-                    status_text.text(f"--- Technical batch processing complete. {len(tech_passed_all)} passed. ---")
                 
                 # Store technical results in session state
                 st.session_state.tech_passed_tickers = tech_passed_all
@@ -772,7 +800,7 @@ def main():
                     return
                 
                 # Process fundamental filters for stocks that passed technical screening
-                status_text.text(f"--- Processing fundamental data for {len(tech_passed_all)} stocks that passed technical screening ---")
+                status_text.text(f"Processing fundamental screening for {len(tech_passed_all)} stocks...")
                 
                 # Extract just the ticker symbols from technical results
                 tech_passed_symbols = [result[0] for result in tech_passed_all]
@@ -809,7 +837,6 @@ def main():
                         ticker = future_to_ticker[future]  # Look up the ticker for this future
                         result = future.result()
                         completed += 1
-                        print(f"({completed}/{len(futures)}) Fundamental future completed for {ticker}")
                         
                         if result:
                             fund_passed.append(result)
@@ -819,7 +846,10 @@ def main():
                         # Update progress for fundamental processing
                         progress = 0.5 + (0.5 * completed / len(futures))
                         progress_bar.progress(progress)
-                        status_text.text(f"--- Processed fundamental data for {completed}/{len(futures)} stocks ---")
+                        
+                        # Update status every 10 stocks
+                        if completed % 10 == 0 or completed == len(futures):
+                            status_text.text(f"Processed fundamental data: {completed}/{len(futures)} stocks...")
                 
                 # Store fundamental results in session state
                 st.session_state.fund_passed_tickers = fund_passed
@@ -878,27 +908,6 @@ def main():
         - Available Tickers: {exchange_info[selected_exchange]['count']}
         - Last Run: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         """)
-        
-        # Environment Information (for debugging)
-        st.subheader("Environment Information")
-        st.write(f"Current Working Directory: {os.getcwd()}")
-        
-        # Try to list files in repository root
-        try:
-            repo_dir = '/mount/src/v11'
-            if os.path.exists(repo_dir):
-                files = os.listdir(repo_dir)
-                st.write(f"Files in repository root: {files}")
-            else:
-                st.write(f"Repository directory {repo_dir} does not exist")
-                
-            # Try alternative repository path
-            alt_repo_dir = '/mount/src/v10'
-            if os.path.exists(alt_repo_dir):
-                files = os.listdir(alt_repo_dir)
-                st.write(f"Files in alternative repository root: {files}")
-        except Exception as e:
-            st.write(f"Error listing repository directory: {e}")
         
         # Debug Logs (only shown if enabled in Settings)
         if show_debug and hasattr(st.session_state, 'errors') and hasattr(st.session_state, 'warnings'):
@@ -975,95 +984,136 @@ def main():
         else:
             st.info("No fundamental data available. Run the screener first.")
     
-    # Results Tab
+    # Results Tab - Improved layout
     with tab1:
-        st.header(f"Screener Results for {exchange_info[selected_exchange]['name']}")
-        
         # Check if screening has been run
         if not hasattr(st.session_state, 'tech_passed_tickers'):
             st.info("👈 Set your filters and click 'Run Screener Now' in the sidebar to start screening.")
             return
         
-        # Always display technical screening results
-        if hasattr(st.session_state, 'tech_passed_tickers') and st.session_state.tech_passed_tickers:
-            st.subheader("Technical Screening Results")
-            tech_count = len(st.session_state.tech_passed_tickers)
-            st.write(f"**{tech_count} stocks passed technical screening**")
-            
-            # Create a DataFrame for technical results
-            tech_results = []
-            for tech_result in st.session_state.tech_passed_tickers:
-                ticker, rsi, signal, rsi_history = tech_result
-                
-                # Create RSI chart
-                rsi_chart = create_rsi_chart(ticker, rsi_history)
-                
-                # Add to results
-                tech_results.append({
-                    "Ticker": ticker,
-                    "RSI": f"{rsi:.2f}",
-                    "Signal": signal,
-                    "RSI Chart": rsi_chart
-                })
-            
-            # Convert to DataFrame
-            if tech_results:
-                tech_df = pd.DataFrame(tech_results)
-                
-                # Display as HTML table with embedded charts
-                html_table = tech_df.to_html(escape=False, index=False)
-                st.write(html_table, unsafe_allow_html=True)
-                
-                # Add download button for CSV (without charts)
-                csv_df = tech_df.drop(columns=["RSI Chart"])
-                csv = csv_df.to_csv(index=False)
-                b64 = base64.b64encode(csv.encode()).decode()
-                href = f'<a href="data:file/csv;base64,{b64}" download="technical_results.csv">Download Technical Results as CSV</a>'
-                st.markdown(href, unsafe_allow_html=True)
+        # Create two columns for results
+        col1, col2 = st.columns([1, 1])
         
-        # Display fundamental screening results if available
-        if hasattr(st.session_state, 'fund_passed_tickers') and st.session_state.fund_passed_tickers:
-            st.subheader("Fundamental Screening Results")
-            fund_count = len(st.session_state.fund_passed_tickers)
-            st.write(f"**{fund_count} stocks passed all filters (technical + fundamental)**")
-            
-            # Create a DataFrame for display
-            fund_results = []
-            for fund_result in st.session_state.fund_passed_tickers:
-                ticker, net_income, growth, pe, pb, _ = fund_result
+        # Technical Results in first column
+        with col1:
+            # Always display technical screening results
+            if hasattr(st.session_state, 'tech_passed_tickers') and st.session_state.tech_passed_tickers:
+                st.subheader("Technical Screening Results")
+                tech_count = len(st.session_state.tech_passed_tickers)
+                st.write(f"**{tech_count} stocks passed technical screening**")
                 
-                # Find the corresponding technical result
-                tech_result = next((t for t in st.session_state.tech_passed_tickers if t[0] == ticker), None)
-                if tech_result:
-                    _, rsi, signal, _ = tech_result
+                # Create a DataFrame for technical results
+                tech_results = []
+                for tech_result in st.session_state.tech_passed_tickers:
+                    ticker, rsi, signal, rsi_history = tech_result
                     
-                    # Add to results
-                    fund_results.append({
+                    # Add to results without chart for table display
+                    tech_results.append({
                         "Ticker": ticker,
                         "RSI": f"{rsi:.2f}",
-                        "Signal": signal,
-                        "Net Income (T)": f"{net_income:.3f}",
-                        "Growth (%)": f"{growth:.2f}" if growth is not None else "N/A",
-                        "P/E": f"{pe:.2f}" if pe is not None else "N/A",
-                        "P/B": f"{pb:.2f}" if pb is not None else "N/A"
+                        "Signal": signal
                     })
+                
+                # Convert to DataFrame
+                if tech_results:
+                    tech_df = pd.DataFrame(tech_results)
+                    
+                    # Display as a sortable dataframe
+                    st.dataframe(tech_df, height=400)
+                    
+                    # Add download button for CSV
+                    csv = tech_df.to_csv(index=False)
+                    b64 = base64.b64encode(csv.encode()).decode()
+                    st.download_button(
+                        label="Download Technical Results as CSV",
+                        data=csv,
+                        file_name="technical_results.csv",
+                        mime="text/csv"
+                    )
+        
+        # Fundamental Results in second column
+        with col2:
+            # Display fundamental screening results if available
+            if hasattr(st.session_state, 'fund_passed_tickers') and st.session_state.fund_passed_tickers:
+                st.subheader("Fundamental Screening Results")
+                fund_count = len(st.session_state.fund_passed_tickers)
+                st.write(f"**{fund_count} stocks passed all filters**")
+                
+                # Create a DataFrame for display
+                fund_results = []
+                for fund_result in st.session_state.fund_passed_tickers:
+                    ticker, net_income, growth, pe, pb, _ = fund_result
+                    
+                    # Find the corresponding technical result
+                    tech_result = next((t for t in st.session_state.tech_passed_tickers if t[0] == ticker), None)
+                    if tech_result:
+                        _, rsi, signal, _ = tech_result
+                        
+                        # Add to results
+                        fund_results.append({
+                            "Ticker": ticker,
+                            "RSI": f"{rsi:.2f}",
+                            "Signal": signal,
+                            "Net Income (T)": f"{net_income:.3f}",
+                            "Growth (%)": f"{growth:.2f}" if growth is not None else "N/A",
+                            "P/E": f"{pe:.2f}" if pe is not None else "N/A",
+                            "P/B": f"{pb:.2f}" if pb is not None else "N/A"
+                        })
+                
+                # Convert to DataFrame
+                if fund_results:
+                    fund_df = pd.DataFrame(fund_results)
+                    
+                    # Display as a sortable dataframe
+                    st.dataframe(fund_df, height=400)
+                    
+                    # Add download button for CSV
+                    csv = fund_df.to_csv(index=False)
+                    b64 = base64.b64encode(csv.encode()).decode()
+                    st.download_button(
+                        label="Download Fundamental Results as CSV",
+                        data=csv,
+                        file_name="fundamental_results.csv",
+                        mime="text/csv"
+                    )
+                else:
+                    st.warning("Something went wrong with the fundamental results processing.")
+            elif hasattr(st.session_state, 'tech_passed_tickers') and st.session_state.tech_passed_tickers:
+                st.subheader("Fundamental Screening Results")
+                st.warning("⚠️ No stocks passed the fundamental screening. Try these solutions:")
+                st.markdown("""
+                1. **Check the 'Fundamental Data' tab** to see what data is available
+                2. **Enable 'Skip Missing Data'** in the sidebar
+                3. **Relax your fundamental filters**:
+                   - Lower the 'Min Net Income' value
+                   - Increase the 'Max P/E Ratio' value
+                   - Increase the 'Max P/B Ratio' value
+                   - Lower the 'Min YoY Growth' value
+                """)
+        
+        # Display RSI charts in a more compact grid layout
+        if hasattr(st.session_state, 'tech_passed_tickers') and st.session_state.tech_passed_tickers:
+            st.subheader("RSI Charts")
             
-            # Convert to DataFrame
-            if fund_results:
-                fund_df = pd.DataFrame(fund_results)
-                
-                # Display as HTML table
-                st.dataframe(fund_df)
-                
-                # Add download button for CSV
-                csv = fund_df.to_csv(index=False)
-                b64 = base64.b64encode(csv.encode()).decode()
-                href = f'<a href="data:file/csv;base64,{b64}" download="fundamental_results.csv">Download Fundamental Results as CSV</a>'
-                st.markdown(href, unsafe_allow_html=True)
-            else:
-                st.warning("Something went wrong with the fundamental results processing.")
-        elif hasattr(st.session_state, 'tech_passed_tickers') and st.session_state.tech_passed_tickers:
-            st.warning("⚠️ No stocks passed the fundamental screening. Try relaxing your fundamental filters or check the 'Fundamental Data' tab to see what data is available.")
+            # Create a grid of charts
+            chart_cols = 3  # Number of charts per row
+            
+            # Limit to first 12 charts to avoid excessive scrolling
+            display_limit = min(12, len(st.session_state.tech_passed_tickers))
+            
+            # Create rows of charts
+            for i in range(0, display_limit, chart_cols):
+                cols = st.columns(chart_cols)
+                for j in range(chart_cols):
+                    if i + j < display_limit:
+                        ticker, rsi, signal, rsi_history = st.session_state.tech_passed_tickers[i + j]
+                        with cols[j]:
+                            st.markdown(f"**{ticker}** - RSI: {rsi:.2f} ({signal})")
+                            st.markdown(create_rsi_chart(ticker, rsi_history), unsafe_allow_html=True)
+            
+            # Show message if there are more charts
+            if len(st.session_state.tech_passed_tickers) > display_limit:
+                st.info(f"Showing first {display_limit} of {len(st.session_state.tech_passed_tickers)} charts. Download the CSV for complete results.")
 
 
 if __name__ == "__main__":
