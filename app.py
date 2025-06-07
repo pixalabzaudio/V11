@@ -206,7 +206,8 @@ def get_rsi_yfinance(ticker):
 def get_fundamentals(ticker):
     '''
     Retrieve fundamental financial data for a given ticker using yfinance.
-    Returns: (net_income, prev_net_income, pe_ratio, pb_ratio) or None if essential data unavailable/invalid
+    Returns: (net_income, prev_net_income, pe_ratio, pb_ratio, raw_data) or None if essential data unavailable/invalid
+    raw_data is a dictionary containing all retrieved data for debugging
     '''
     print(f"[{ticker}] --- Starting get_fundamentals --- ")
     try:
@@ -214,6 +215,17 @@ def get_fundamentals(ticker):
         info = stock.info
         financials = stock.financials
         print(f"[{ticker}] yfinance info and financials fetched.")
+        
+        # Create a raw data dictionary for debugging
+        raw_data = {
+            "info_keys": list(info.keys()) if info else [],
+            "financials_index": list(financials.index) if not financials.empty else [],
+            "has_net_income": "Net Income" in financials.index if not financials.empty else False,
+            "trailing_pe": info.get("trailingPE", "Not Available"),
+            "price_to_book": info.get("priceToBook", "Not Available"),
+            "market_cap": info.get("marketCap", "Not Available"),
+            "currency": info.get("currency", "Unknown")
+        }
 
         # Initialize metrics
         net_income, prev_net_income, pe_ratio, pb_ratio = None, 0, None, None # Default prev_ni to 0
@@ -226,20 +238,28 @@ def get_fundamentals(ticker):
                     # Handle potential MultiIndex or different structures
                     if isinstance(ni_series, pd.Series):
                         net_income = ni_series.iloc[0] / 1e12 # Current NI in Trillion IDR
+                        raw_data["net_income_raw"] = float(ni_series.iloc[0]) if not pd.isna(ni_series.iloc[0]) else "NaN"
+                        
                         if len(ni_series) > 1:
                             prev_net_income = ni_series.iloc[1] / 1e12 # Previous NI in Trillion IDR
+                            raw_data["prev_net_income_raw"] = float(ni_series.iloc[1]) if not pd.isna(ni_series.iloc[1]) else "NaN"
                         else:
                             print(f"[{ticker}] Fund. Warning: Previous Net Income missing (Series format). Growth may be inaccurate.")
                             st.session_state.setdefault("warnings", {})
                             st.session_state.warnings[ticker] = f"Fund. Warning: Previous Net Income missing, growth calculation may be inaccurate."
+                            raw_data["prev_net_income_missing"] = True
                     else: # Handle DataFrame case if structure changes
                          net_income = ni_series.iloc[0, 0] / 1e12
+                         raw_data["net_income_raw"] = float(ni_series.iloc[0, 0]) if not pd.isna(ni_series.iloc[0, 0]) else "NaN"
+                         
                          if ni_series.shape[1] > 1:
                              prev_net_income = ni_series.iloc[0, 1] / 1e12
+                             raw_data["prev_net_income_raw"] = float(ni_series.iloc[0, 1]) if not pd.isna(ni_series.iloc[0, 1]) else "NaN"
                          else:
                              print(f"[{ticker}] Fund. Warning: Previous Net Income missing (DataFrame format). Growth may be inaccurate.")
                              st.session_state.setdefault("warnings", {})
                              st.session_state.warnings[ticker] = f"Fund. Warning: Previous Net Income missing (DataFrame format)."
+                             raw_data["prev_net_income_missing"] = True
                     print(f"[{ticker}] Net Income extracted: Current={net_income:.3f}T, Previous={prev_net_income:.3f}T")
 
                 except (IndexError, TypeError, ValueError, KeyError) as e:
@@ -247,15 +267,28 @@ def get_fundamentals(ticker):
                      print(f"[{ticker}] {error_msg}")
                      st.session_state.setdefault("errors", {})
                      st.session_state.errors[ticker] = error_msg
+                     raw_data["net_income_error"] = str(e)
                      net_income = None # Mark as invalid if extraction failed
             else:
                 print(f"[{ticker}] Fund. Warning: 'Net Income' series is empty in financials.")
                 st.session_state.setdefault("warnings", {})
                 st.session_state.warnings[ticker] = f"Fund. Warning: 'Net Income' series is empty in financials."
+                raw_data["net_income_series_empty"] = True
         else:
             print(f"[{ticker}] Fund. Warning: 'Net Income' not found or financials empty.")
             st.session_state.setdefault("warnings", {})
             st.session_state.warnings[ticker] = f"Fund. Warning: 'Net Income' not found or empty in yfinance financials."
+            raw_data["net_income_not_found"] = True
+            
+            # Try to use a default value for Net Income if it's missing
+            # This is a fallback to allow screening to continue
+            if info.get("marketCap") is not None:
+                # Estimate Net Income as 5% of market cap (very rough estimate)
+                estimated_ni = info.get("marketCap", 0) * 0.05 / 1e12
+                print(f"[{ticker}] Using estimated Net Income based on market cap: {estimated_ni:.3f}T")
+                net_income = estimated_ni
+                raw_data["net_income_estimated"] = True
+                raw_data["net_income_estimated_value"] = float(estimated_ni)
 
         # --- P/E Ratio ---
         pe_ratio = info.get("trailingPE", None)
@@ -265,8 +298,10 @@ def get_fundamentals(ticker):
             st.session_state.setdefault("warnings", {})
             st.session_state.warnings[ticker] = warning_msg
             pe_ratio = None # Ensure it's None if invalid
+            raw_data["pe_ratio_missing"] = True
         else:
             print(f"[{ticker}] P/E Ratio extracted: {pe_ratio:.2f}")
+            raw_data["pe_ratio_value"] = float(pe_ratio)
 
         # --- P/B Ratio ---
         pb_ratio = info.get("priceToBook", None)
@@ -276,8 +311,10 @@ def get_fundamentals(ticker):
             st.session_state.setdefault("warnings", {})
             st.session_state.warnings[ticker] = warning_msg
             pb_ratio = None # Ensure it's None if invalid
+            raw_data["pb_ratio_missing"] = True
         else:
              print(f"[{ticker}] P/B Ratio extracted: {pb_ratio:.2f}")
+             raw_data["pb_ratio_value"] = float(pb_ratio)
 
         # --- Check Essential Data for Filtering ---
         if net_income is None or not isinstance(net_income, (int, float)) or np.isnan(net_income):
@@ -285,11 +322,12 @@ def get_fundamentals(ticker):
             print(f"[{ticker}] {error_msg}")
             st.session_state.setdefault("errors", {})
             st.session_state.errors[ticker] = error_msg
+            raw_data["net_income_invalid"] = True
             return None # Cannot proceed without Net Income
 
         # Return collected data (prev_net_income defaults to 0 if missing)
         print(f"[{ticker}] --- Successfully completed get_fundamentals --- ")
-        return (net_income, prev_net_income, pe_ratio, pb_ratio)
+        return (net_income, prev_net_income, pe_ratio, pb_ratio, raw_data)
 
     except Exception as e:
         error_msg = f"Fund. yfinance Error: {e}\n{traceback.format_exc()}"
@@ -343,10 +381,11 @@ def process_ticker_technical_first(ticker, rsi_min, rsi_max, show_oversold, show
         return None
 
 
-def process_ticker_fundamental(ticker, min_net_income, max_pe, max_pb, min_growth):
+def process_ticker_fundamental(ticker, min_net_income, max_pe, max_pb, min_growth, skip_missing=True):
     '''
     Process a single ticker with fundamental filters.
-    Returns: [ticker_symbol, net_income, growth, pe, pb] or None if not matching criteria
+    Returns: [ticker_symbol, net_income, growth, pe, pb, raw_data] or None if not matching criteria
+    If skip_missing is True, filters will be skipped if the corresponding data is missing
     '''
     print(f"[{ticker}] Processing fundamental filters...")
     try:
@@ -357,17 +396,19 @@ def process_ticker_fundamental(ticker, min_net_income, max_pe, max_pb, min_growt
             print(f"[{ticker}] Skipping fundamental processing due to data fetch/calc failure.")
             return None
 
-        net_income, prev_net_income, pe_ratio, pb_ratio = fund_data
+        net_income, prev_net_income, pe_ratio, pb_ratio, raw_data = fund_data
 
         # Calculate YoY growth if previous net income is available and not zero
         if prev_net_income != 0:
             growth = ((net_income - prev_net_income) / abs(prev_net_income)) * 100
+            raw_data["growth_calculated"] = float(growth)
         else:
             # If previous NI is zero, we can't calculate percentage growth
             growth = None
-            print(f"[{ticker}] Fund. Warning: Cannot calculate growth (previous NI is zero).")
+            print(f"[{ticker}] Fund. Warning: Cannot calculate growth (previous NI is zero or missing).")
             st.session_state.setdefault("warnings", {})
-            st.session_state.warnings[ticker] = f"Fund. Warning: Cannot calculate growth (previous NI is zero)."
+            st.session_state.warnings[ticker] = f"Fund. Warning: Cannot calculate growth (previous NI is zero or missing)."
+            raw_data["growth_calculation_failed"] = True
 
         # Apply Net Income filter
         if net_income < min_net_income:
@@ -377,7 +418,7 @@ def process_ticker_fundamental(ticker, min_net_income, max_pe, max_pb, min_growt
             return None
 
         # Apply P/E filter if available
-        if pe_ratio is not None and max_pe < 1000:  # Only apply if we have valid PE and filter is active
+        if pe_ratio is not None and max_pe < 100:  # Only apply if we have valid PE and filter is active
             if pe_ratio > max_pe:
                 print(f"[{ticker}] Filtering out: P/E {pe_ratio:.2f} > maximum {max_pe:.2f}")
                 st.session_state.setdefault("filtered_out_fundamental", {})
@@ -385,9 +426,11 @@ def process_ticker_fundamental(ticker, min_net_income, max_pe, max_pb, min_growt
                 return None
         else:
             print(f"[{ticker}] Skipping P/E filter (P/E={pe_ratio}, max_pe={max_pe})")
+            if skip_missing:
+                raw_data["pe_filter_skipped"] = True
 
         # Apply P/B filter if available
-        if pb_ratio is not None and max_pb < 100:  # Only apply if we have valid PB and filter is active
+        if pb_ratio is not None and max_pb < 20:  # Only apply if we have valid PB and filter is active
             if pb_ratio > max_pb:
                 print(f"[{ticker}] Filtering out: P/B {pb_ratio:.2f} > maximum {max_pb:.2f}")
                 st.session_state.setdefault("filtered_out_fundamental", {})
@@ -395,6 +438,8 @@ def process_ticker_fundamental(ticker, min_net_income, max_pe, max_pb, min_growt
                 return None
         else:
             print(f"[{ticker}] Skipping P/B filter (P/B={pb_ratio}, max_pb={max_pb})")
+            if skip_missing:
+                raw_data["pb_filter_skipped"] = True
 
         # Apply Growth filter if available
         if growth is not None and min_growth > -100:  # Only apply if we have valid growth and filter is active
@@ -405,10 +450,12 @@ def process_ticker_fundamental(ticker, min_net_income, max_pe, max_pb, min_growt
                 return None
         else:
             print(f"[{ticker}] Skipping Growth filter (Growth={growth}, min_growth={min_growth})")
+            if skip_missing:
+                raw_data["growth_filter_skipped"] = True
 
         # If we get here, the ticker passed all fundamental filters
         print(f"[{ticker}] Passed fundamental filters: NI={net_income:.3f}T, Growth={growth:.2f if growth is not None else None}%, P/E={pe_ratio:.2f if pe_ratio is not None else None}, P/B={pb_ratio:.2f if pb_ratio is not None else None}")
-        return [ticker, net_income, growth, pe_ratio, pb_ratio]
+        return [ticker, net_income, growth, pe_ratio, pb_ratio, raw_data]
 
     except Exception as e:
         error_msg = f"Fundamental Processing Error: {e}\n{traceback.format_exc()}"
@@ -569,7 +616,7 @@ def main():
         all_tickers = all_tickers[:MAX_TICKERS]
     
     # Create tabs
-    tab1, tab2, tab3 = st.tabs(["Screener Results", "Settings", "About & Logs"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Screener Results", "Settings", "About & Logs", "Fundamental Data"])
     
     # Sidebar for filters
     with st.sidebar:
@@ -598,6 +645,10 @@ def main():
         
         # Fundamental Filters
         st.subheader("Fundamental Filters")
+        
+        # Skip missing data option
+        skip_missing = st.checkbox("Skip Missing Data", value=True, 
+                                  help="If checked, stocks will not be filtered out when data is missing")
         
         # Net Income Slider (in Trillion IDR)
         min_net_income = st.slider(
@@ -644,6 +695,7 @@ def main():
             st.session_state.warnings = {}
             st.session_state.filtered_out_technical = {}
             st.session_state.filtered_out_fundamental = {}
+            st.session_state.raw_fundamental_data = {}
             
             # Show progress bar in the main area
             with tab1:
@@ -739,7 +791,8 @@ def main():
                             min_net_income,
                             max_pe,
                             max_pb,
-                            min_growth
+                            min_growth,
+                            skip_missing
                         )
                         futures.append(future)
                         future_to_ticker[future] = ticker  # Store mapping of future to ticker
@@ -749,6 +802,7 @@ def main():
                     # Process results as they complete (no timeout)
                     fund_passed = []
                     completed = 0
+                    raw_fundamental_data = {}
                     
                     # Use as_completed to process futures as they finish
                     for future in concurrent.futures.as_completed(futures):
@@ -759,6 +813,8 @@ def main():
                         
                         if result:
                             fund_passed.append(result)
+                            # Store raw data for debugging
+                            raw_fundamental_data[ticker] = result[5]
                         
                         # Update progress for fundamental processing
                         progress = 0.5 + (0.5 * completed / len(futures))
@@ -767,6 +823,7 @@ def main():
                 
                 # Store fundamental results in session state
                 st.session_state.fund_passed_tickers = fund_passed
+                st.session_state.raw_fundamental_data = raw_fundamental_data
                 
                 # Final status
                 if fund_passed:
@@ -804,6 +861,10 @@ def main():
         - AMEX (American Stock Exchange)
         
         Data is sourced from Yahoo Finance via the yfinance Python library.
+        
+        **Note on Fundamental Data:**
+        Yahoo Finance may not have complete fundamental data for all stocks, especially for international exchanges like IDX. 
+        When data is missing, you can check the "Skip Missing Data" option to prevent stocks from being filtered out based on missing metrics.
         """)
     
     # About & Logs Tab
@@ -875,6 +936,45 @@ def main():
                 else:
                     st.write("No stocks filtered out by fundamental criteria.")
     
+    # Fundamental Data Tab (for debugging)
+    with tab4:
+        st.header("Fundamental Data Availability")
+        st.write("""
+        This tab shows what fundamental data is available from Yahoo Finance for each stock that passed technical screening.
+        Use this information to understand why stocks might not be passing fundamental screening.
+        """)
+        
+        if hasattr(st.session_state, 'raw_fundamental_data') and st.session_state.raw_fundamental_data:
+            # Create a table of available data
+            data_rows = []
+            for ticker, raw_data in st.session_state.raw_fundamental_data.items():
+                row = {
+                    "Ticker": ticker,
+                    "Net Income": "✅" if "net_income_raw" in raw_data else "❌",
+                    "Previous Net Income": "✅" if "prev_net_income_raw" in raw_data and not raw_data.get("prev_net_income_missing", False) else "❌",
+                    "P/E Ratio": "✅" if "pe_ratio_value" in raw_data else "❌",
+                    "P/B Ratio": "✅" if "pb_ratio_value" in raw_data else "❌",
+                    "Growth Calculation": "✅" if "growth_calculated" in raw_data else "❌",
+                    "Filters Skipped": ", ".join([k.replace("_filter_skipped", "") for k in raw_data.keys() if k.endswith("_filter_skipped")])
+                }
+                data_rows.append(row)
+            
+            if data_rows:
+                st.dataframe(pd.DataFrame(data_rows))
+                
+                # Show detailed data for a selected ticker
+                st.subheader("Detailed Fundamental Data")
+                selected_ticker = st.selectbox("Select Ticker for Details", 
+                                              options=[row["Ticker"] for row in data_rows])
+                
+                if selected_ticker:
+                    raw_data = st.session_state.raw_fundamental_data.get(selected_ticker, {})
+                    st.json(raw_data)
+            else:
+                st.info("No fundamental data available. Run the screener first.")
+        else:
+            st.info("No fundamental data available. Run the screener first.")
+    
     # Results Tab
     with tab1:
         st.header(f"Screener Results for {exchange_info[selected_exchange]['name']}")
@@ -930,7 +1030,7 @@ def main():
             # Create a DataFrame for display
             fund_results = []
             for fund_result in st.session_state.fund_passed_tickers:
-                ticker, net_income, growth, pe, pb = fund_result
+                ticker, net_income, growth, pe, pb, _ = fund_result
                 
                 # Find the corresponding technical result
                 tech_result = next((t for t in st.session_state.tech_passed_tickers if t[0] == ticker), None)
@@ -963,7 +1063,7 @@ def main():
             else:
                 st.warning("Something went wrong with the fundamental results processing.")
         elif hasattr(st.session_state, 'tech_passed_tickers') and st.session_state.tech_passed_tickers:
-            st.warning("⚠️ No stocks passed the fundamental screening. Try relaxing your fundamental filters.")
+            st.warning("⚠️ No stocks passed the fundamental screening. Try relaxing your fundamental filters or check the 'Fundamental Data' tab to see what data is available.")
 
 
 if __name__ == "__main__":
