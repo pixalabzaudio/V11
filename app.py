@@ -147,6 +147,10 @@ def get_rsi_yfinance(ticker):
 
 @st.cache_data(ttl=86400)
 def get_fundamentals(ticker):
+    '''
+    Retrieve fundamental financial data for a given ticker using yfinance.
+    Returns: (net_income, prev_net_income, pe_ratio, pb_ratio, raw_data) or None if essential data unavailable/invalid
+    '''
     print(f"[{ticker}] --- Starting get_fundamentals --- ")
     raw_data = {}
     net_income, prev_net_income, pe_ratio, pb_ratio = None, 0, None, None # prev_net_income defaults to 0
@@ -175,16 +179,26 @@ def get_fundamentals(ticker):
             raw_data["net_income_series_raw"] = ni_series.to_dict() # Log the raw series
             if not ni_series.empty and pd.api.types.is_numeric_dtype(ni_series):
                 try:
-                    net_income = ni_series.iloc[0] / 1e12 # Current NI in Trillion (adjust if currency not IDR or scale differs)
-                    raw_data["net_income_calculated_trillions"] = float(net_income) if not pd.isna(net_income) else "NaN"
-                    if len(ni_series) > 1:
-                        prev_net_income = ni_series.iloc[1] / 1e12
-                        raw_data["prev_net_income_calculated_trillions"] = float(prev_net_income) if not pd.isna(prev_net_income) else "NaN"
-                    else:
-                        raw_data["prev_net_income_missing_in_series"] = True
-                except (IndexError, TypeError, ValueError) as e:
+                    # Handle potential MultiIndex or different structures
+                    if isinstance(ni_series, pd.Series):
+                        net_income = ni_series.iloc[0] / 1e12 # Current NI in Trillion IDR
+                        raw_data["net_income_calculated_trillions"] = float(net_income) if not pd.isna(net_income) else "NaN"
+                        if len(ni_series) > 1:
+                            prev_net_income = ni_series.iloc[1] / 1e12
+                            raw_data["prev_net_income_calculated_trillions"] = float(prev_net_income) if not pd.isna(prev_net_income) else "NaN"
+                        else:
+                            raw_data["prev_net_income_missing_in_series"] = True
+                    else: # Handle DataFrame case if structure changes
+                         net_income = ni_series.iloc[0, 0] / 1e12
+                         raw_data["net_income_calculated_trillions"] = float(net_income) if not pd.isna(net_income) else "NaN"
+                         if ni_series.shape[1] > 1:
+                             prev_net_income = ni_series.iloc[0, 1] / 1e12
+                             raw_data["prev_net_income_calculated_trillions"] = float(prev_net_income) if not pd.isna(prev_net_income) else "NaN"
+                         else:
+                             raw_data["prev_net_income_missing_in_series"] = True
+                except (IndexError, TypeError, ValueError, KeyError) as e:
                     raw_data["net_income_extraction_error"] = str(e)
-                    net_income = None # Mark as invalid
+                    net_income = None # Mark as invalid if extraction failed
             else:
                 raw_data["net_income_series_empty_or_not_numeric"] = True
         else:
@@ -436,7 +450,7 @@ def main():
         
         # Fundamental Filters Section with Enable/Disable option
         st.subheader("Fundamental Filters")
-        enable_fundamental = st.checkbox("Enable Fundamental Screening", value=False, 
+        enable_fundamental = st.checkbox("Enable Fundamental Screening", value=True, 
                                         help="Warning: Yahoo Finance has limited fundamental data for many exchanges. Disable for technical-only screening.")
         
         # Only show fundamental filters if enabled
@@ -534,10 +548,10 @@ def main():
         <strong>About Yahoo Finance Data</strong><br>
         Yahoo Finance provides reliable technical data (price history, RSI) for most exchanges, but fundamental data coverage varies:
         <ul>
-        <li>IDX (Indonesia): Limited fundamental data</li>
+        <li>IDX (Indonesia): Good fundamental data for many stocks</li>
         <li>NYSE, NASDAQ, AMEX: Inconsistent fundamental data through API</li>
         </ul>
-        For best results, use technical screening only or upload custom fundamental data.
+        For best results with non-IDX exchanges, use technical screening only or upload custom fundamental data.
         </div>
         """, unsafe_allow_html=True)
         
@@ -549,8 +563,9 @@ def main():
         <strong>Multi-Exchange Stock Screener</strong><br>
         This application allows you to screen stocks from multiple exchanges using technical and fundamental criteria.
         <ul>
-        <li><strong>Technical Screening:</strong> Based on RSI (Relative Strength Index) values and signals</li>
-        <li><strong>Fundamental Screening:</strong> Based on Net Income, P/E Ratio, P/B Ratio, and YoY Growth</li>
+        <li><strong>Technical Screening:</strong> Based on RSI (Relative Strength Index) values and signals (Oversold < {OVERSOLD_THRESHOLD}, Overbought > {OVERBOUGHT_THRESHOLD}). Uses Wilder's Smoothing.</li>
+        <li><strong>Fundamental Screening:</strong> Based on Net Income, P/E Ratio, P/B Ratio, and YoY Growth to the stocks that passed the technical screen.</li>
+        <li><strong>Data:</strong> Technical data cached for 5 mins, Fundamental data for 24 hours.</li>
         </ul>
         </div>
         """, unsafe_allow_html=True)
@@ -567,8 +582,8 @@ def main():
         
         st.markdown("""
         <div class="warning-box">
-        <strong>Limited Fundamental Data</strong><br>
-        Yahoo Finance provides inconsistent fundamental data coverage across different exchanges.
+        <strong>Fundamental Data Coverage</strong><br>
+        Yahoo Finance provides good fundamental data for IDX (Indonesian) stocks, but coverage for other exchanges varies.
         This tab shows which fundamental metrics are available for each stock that passed technical screening.
         </div>
         """, unsafe_allow_html=True)
@@ -660,7 +675,7 @@ def main():
             return
             
         # Display warning about fundamental data if appropriate
-        if not st.session_state.get('fund_passed_tickers') and 'tech_passed_tickers' in st.session_state:
+        if enable_fundamental and not st.session_state.get('fund_passed_tickers') and 'tech_passed_tickers' in st.session_state:
             st.markdown("""
             <div class="warning-box">
             <strong>No Stocks Passed Fundamental Screening</strong><br>
@@ -694,7 +709,7 @@ def main():
                             st.markdown(create_rsi_chart(ticker_chart, rsi_hist_chart), unsafe_allow_html=True)
         
         # Fundamental Results Section (only if enabled and stocks passed)
-        if st.session_state.get('fund_passed_tickers'):
+        if enable_fundamental and st.session_state.get('fund_passed_tickers'):
             st.subheader("Fundamental Screening Results")
             fund_df_data = []
             for res_fund in st.session_state.fund_passed_tickers:
