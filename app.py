@@ -18,11 +18,11 @@ from exchange_tickers import get_exchange_tickers, get_exchange_info
 
 # Constants
 MAX_TICKERS = 950
-# Relaxed Default Fundamental Filters
-DEFAULT_MIN_NI = 0.1  # Default minimum Net Income in trillion IDR (Relaxed from 1.0)
-DEFAULT_MAX_PE = 30.0  # Default maximum P/E ratio (Relaxed from 15.0)
-DEFAULT_MAX_PB = 2.5  # Default maximum P/B ratio (Relaxed from 1.5)
-DEFAULT_MIN_GROWTH = -20.0 # Default minimum YoY growth (Relaxed from 0.0)
+# Realistic Default Fundamental Filters
+DEFAULT_MIN_NI = 0.0  # Default minimum Net Income in trillion IDR
+DEFAULT_MAX_PE = 25.0  # Default maximum P/E ratio
+DEFAULT_MAX_PB = 3.0  # Default maximum P/B ratio
+DEFAULT_MIN_GROWTH = -20.0 # Default minimum YoY growth
 
 RSI_PERIOD = 25  # Period for RSI calculation
 OVERSOLD_THRESHOLD = 30
@@ -397,7 +397,7 @@ def process_ticker_fundamental(ticker, min_net_income, max_pe, max_pb, min_growt
             print(f"[{ticker}] Skipping P/B filter (P/B={pb_ratio}, max_pb={max_pb})")
 
         # Apply Growth filter if available
-        if growth is not None and min_growth > -1000:  # Only apply if we have valid growth and filter is active
+        if growth is not None and min_growth > -100:  # Only apply if we have valid growth and filter is active
             if growth < min_growth:
                 print(f"[{ticker}] Filtering out: Growth {growth:.2f}% < minimum {min_growth:.2f}%")
                 st.session_state.setdefault("filtered_out_fundamental", {})
@@ -603,7 +603,7 @@ def main():
         min_net_income = st.slider(
             "Min Net Income (T)",
             min_value=0.0,
-            max_value=10.0,
+            max_value=5.0,  # More realistic maximum
             value=DEFAULT_MIN_NI,
             step=0.1
         )
@@ -612,16 +612,16 @@ def main():
         max_pe = st.slider(
             "Max P/E Ratio",
             min_value=1.0,
-            max_value=1000.0,
+            max_value=100.0,  # More realistic maximum
             value=DEFAULT_MAX_PE,
-            step=0.5
+            step=1.0
         )
         
         # P/B Ratio Slider
         max_pb = st.slider(
             "Max P/B Ratio",
             min_value=0.1,
-            max_value=100.0,
+            max_value=20.0,  # More realistic maximum
             value=DEFAULT_MAX_PB,
             step=0.1
         )
@@ -629,8 +629,8 @@ def main():
         # YoY Growth Slider
         min_growth = st.slider(
             "Min YoY Growth (%)",
-            min_value=-1000.0,
-            max_value=1000.0,
+            min_value=-100.0,  # More realistic minimum
+            max_value=200.0,   # More realistic maximum
             value=DEFAULT_MIN_GROWTH,
             step=5.0
         )
@@ -769,7 +769,10 @@ def main():
                 st.session_state.fund_passed_tickers = fund_passed
                 
                 # Final status
-                status_text.text(f"Screening complete! {len(fund_passed)} stocks passed all filters.")
+                if fund_passed:
+                    status_text.text(f"Screening complete! {len(fund_passed)} stocks passed all filters.")
+                else:
+                    status_text.text(f"{len(tech_passed_all)} stocks passed technical screening, but none passed fundamental screening. Try relaxing your fundamental filters.")
                 progress_bar.empty()
     
     # Settings Tab
@@ -881,57 +884,86 @@ def main():
             st.info("👈 Set your filters and click 'Run Screener Now' in the sidebar to start screening.")
             return
         
-        # Display results
+        # Always display technical screening results
+        if hasattr(st.session_state, 'tech_passed_tickers') and st.session_state.tech_passed_tickers:
+            st.subheader("Technical Screening Results")
+            tech_count = len(st.session_state.tech_passed_tickers)
+            st.write(f"**{tech_count} stocks passed technical screening**")
+            
+            # Create a DataFrame for technical results
+            tech_results = []
+            for tech_result in st.session_state.tech_passed_tickers:
+                ticker, rsi, signal, rsi_history = tech_result
+                
+                # Create RSI chart
+                rsi_chart = create_rsi_chart(ticker, rsi_history)
+                
+                # Add to results
+                tech_results.append({
+                    "Ticker": ticker,
+                    "RSI": f"{rsi:.2f}",
+                    "Signal": signal,
+                    "RSI Chart": rsi_chart
+                })
+            
+            # Convert to DataFrame
+            if tech_results:
+                tech_df = pd.DataFrame(tech_results)
+                
+                # Display as HTML table with embedded charts
+                html_table = tech_df.to_html(escape=False, index=False)
+                st.write(html_table, unsafe_allow_html=True)
+                
+                # Add download button for CSV (without charts)
+                csv_df = tech_df.drop(columns=["RSI Chart"])
+                csv = csv_df.to_csv(index=False)
+                b64 = base64.b64encode(csv.encode()).decode()
+                href = f'<a href="data:file/csv;base64,{b64}" download="technical_results.csv">Download Technical Results as CSV</a>'
+                st.markdown(href, unsafe_allow_html=True)
+        
+        # Display fundamental screening results if available
         if hasattr(st.session_state, 'fund_passed_tickers') and st.session_state.fund_passed_tickers:
+            st.subheader("Fundamental Screening Results")
+            fund_count = len(st.session_state.fund_passed_tickers)
+            st.write(f"**{fund_count} stocks passed all filters (technical + fundamental)**")
+            
             # Create a DataFrame for display
-            results = []
+            fund_results = []
             for fund_result in st.session_state.fund_passed_tickers:
                 ticker, net_income, growth, pe, pb = fund_result
                 
                 # Find the corresponding technical result
                 tech_result = next((t for t in st.session_state.tech_passed_tickers if t[0] == ticker), None)
                 if tech_result:
-                    _, rsi, signal, rsi_history = tech_result
-                    
-                    # Create RSI chart
-                    rsi_chart = create_rsi_chart(ticker, rsi_history)
+                    _, rsi, signal, _ = tech_result
                     
                     # Add to results
-                    results.append({
+                    fund_results.append({
                         "Ticker": ticker,
                         "RSI": f"{rsi:.2f}",
                         "Signal": signal,
                         "Net Income (T)": f"{net_income:.3f}",
                         "Growth (%)": f"{growth:.2f}" if growth is not None else "N/A",
                         "P/E": f"{pe:.2f}" if pe is not None else "N/A",
-                        "P/B": f"{pb:.2f}" if pb is not None else "N/A",
-                        "RSI Chart": rsi_chart
+                        "P/B": f"{pb:.2f}" if pb is not None else "N/A"
                     })
             
             # Convert to DataFrame
-            if results:
-                df = pd.DataFrame(results)
+            if fund_results:
+                fund_df = pd.DataFrame(fund_results)
                 
-                # Display as HTML table with embedded charts
-                st.write(f"**{len(results)} stocks passed all filters:**")
+                # Display as HTML table
+                st.dataframe(fund_df)
                 
-                # Convert DataFrame to HTML with embedded charts
-                html_table = df.to_html(escape=False, index=False)
-                st.write(html_table, unsafe_allow_html=True)
-                
-                # Add download button for CSV (without charts)
-                csv_df = df.drop(columns=["RSI Chart"])
-                csv = csv_df.to_csv(index=False)
+                # Add download button for CSV
+                csv = fund_df.to_csv(index=False)
                 b64 = base64.b64encode(csv.encode()).decode()
-                href = f'<a href="data:file/csv;base64,{b64}" download="screener_results.csv">Download Results as CSV</a>'
+                href = f'<a href="data:file/csv;base64,{b64}" download="fundamental_results.csv">Download Fundamental Results as CSV</a>'
                 st.markdown(href, unsafe_allow_html=True)
             else:
-                st.warning("Something went wrong with the results processing.")
-        else:
-            if hasattr(st.session_state, 'tech_passed_tickers') and st.session_state.tech_passed_tickers:
-                st.warning(f"⚠️ {len(st.session_state.tech_passed_tickers)} stocks passed technical screening, but none passed fundamental screening. Try relaxing your fundamental filters.")
-            else:
-                st.warning("⚠️ No stocks passed the screening criteria. Try relaxing your filters.")
+                st.warning("Something went wrong with the fundamental results processing.")
+        elif hasattr(st.session_state, 'tech_passed_tickers') and st.session_state.tech_passed_tickers:
+            st.warning("⚠️ No stocks passed the fundamental screening. Try relaxing your fundamental filters.")
 
 
 if __name__ == "__main__":
