@@ -11,6 +11,7 @@ from functools import partial
 import matplotlib.pyplot as plt
 import io
 import base64
+import os
 
 # Import the exchange ticker lists
 from exchange_tickers import get_exchange_tickers, get_exchange_info
@@ -523,6 +524,45 @@ def main():
     # Get tickers for the selected exchange
     all_tickers = get_exchange_tickers(selected_exchange)
     
+    # Display diagnostic info about CSV files for debugging
+    if selected_exchange != 'IDX' and len(all_tickers) == 0:
+        st.error(f"No tickers found for {exchange_info[selected_exchange]['name']}. Checking CSV files...")
+        
+        # Check if CSV files exist in various locations
+        if selected_exchange == 'NYSE':
+            csv_name = 'NYSEtickers.csv'
+        elif selected_exchange == 'NASDAQ':
+            csv_name = 'NASDAQtickers.csv'
+        elif selected_exchange == 'AMEX':
+            csv_name = 'AMEXtickers.csv'
+        else:
+            csv_name = ''
+            
+        if csv_name:
+            # Check current directory
+            if os.path.exists(csv_name):
+                st.info(f"Found {csv_name} in current directory")
+            else:
+                st.warning(f"Could not find {csv_name} in current directory")
+                
+            # Check repository root
+            repo_path = os.path.join('/mount/src/v11', csv_name)
+            if os.path.exists(repo_path):
+                st.info(f"Found {csv_name} at {repo_path}")
+            else:
+                st.warning(f"Could not find {csv_name} at {repo_path}")
+                
+            # List files in repository root
+            try:
+                repo_dir = '/mount/src/v11'
+                if os.path.exists(repo_dir):
+                    files = os.listdir(repo_dir)
+                    st.info(f"Files in repository root: {files}")
+                else:
+                    st.warning(f"Repository directory {repo_dir} does not exist")
+            except Exception as e:
+                st.error(f"Error listing repository directory: {e}")
+    
     # Limit to MAX_TICKERS to avoid overloading
     if len(all_tickers) > MAX_TICKERS:
         st.warning(f"⚠️ Limited to first {MAX_TICKERS} tickers to avoid overloading.")
@@ -609,6 +649,12 @@ def main():
             with tab1:
                 progress_bar = st.progress(0)
                 status_text = st.empty()
+                
+                # Check if we have tickers to process
+                if len(all_tickers) == 0:
+                    status_text.error(f"No tickers available for {exchange_info[selected_exchange]['name']}. Please check CSV files and try again.")
+                    progress_bar.empty()
+                    return
                 
                 # Process tickers in batches to avoid memory issues
                 total_batches = (len(all_tickers) + BATCH_SIZE - 1) // BATCH_SIZE
@@ -768,6 +814,27 @@ def main():
         - Available Tickers: {exchange_info[selected_exchange]['count']}
         - Last Run: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         """)
+        
+        # Environment Information (for debugging)
+        st.subheader("Environment Information")
+        st.write(f"Current Working Directory: {os.getcwd()}")
+        
+        # Try to list files in repository root
+        try:
+            repo_dir = '/mount/src/v11'
+            if os.path.exists(repo_dir):
+                files = os.listdir(repo_dir)
+                st.write(f"Files in repository root: {files}")
+            else:
+                st.write(f"Repository directory {repo_dir} does not exist")
+                
+            # Try alternative repository path
+            alt_repo_dir = '/mount/src/v10'
+            if os.path.exists(alt_repo_dir):
+                files = os.listdir(alt_repo_dir)
+                st.write(f"Files in alternative repository root: {files}")
+        except Exception as e:
+            st.write(f"Error listing repository directory: {e}")
         
         # Debug Logs (only shown if enabled in Settings)
         if show_debug and hasattr(st.session_state, 'errors') and hasattr(st.session_state, 'warnings'):
